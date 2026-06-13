@@ -1,5 +1,4 @@
- from http.server import BaseHTTPRequestHandler
-import json, io, requests
+ import json, io, requests
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
@@ -370,6 +369,8 @@ def build_excel(all_records):
     return buf.read()
 
 
+from http.server import BaseHTTPRequestHandler
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
@@ -383,11 +384,13 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(excel_bytes)
         except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            self.wfile.write(json.dumps({'error': str(e)}).encode())
+            self.wfile.write(json.dumps({'error': str(e), 'traceback': tb}).encode())
 
     def do_OPTIONS(self):
         self.send_response(200)
