@@ -1,4 +1,4 @@
-const https = require('https');
+ const https = require('https');
 
 const SUPA_URL = 'bmeqpzytgedymtkwtnis.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtZXFwenl0Z2VkeW10a3d0bmlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2MTI4OTAsImV4cCI6MjA5MzE4ODg5MH0.z0zXbMZd1zTXQuKYV2-yRhAzFmoqPhGp8r025KCdC5M';
@@ -233,6 +233,10 @@ module.exports = async (req, res) => {
     // ── DATA SHEET ────────────────────────────────────────────────────────────
     const ws2 = wb.addWorksheet('Extension Recurrence');
     ws2.views = [{showGridLines: false, state:'frozen', xSplit:6, ySplit:2}];
+    ws2.autoFilter = {
+      from: {row: 2, column: 1},
+      to: {row: 2, column: 6 + monthKeys.length*2}
+    };
 
     const FIXED = 6;
     ws2.getColumn(1).width = 9;
@@ -283,14 +287,16 @@ module.exports = async (req, res) => {
         c.font = {name:'Arial', size: opts.size||10, bold: opts.bold||false, color:{argb:'FF'+(opts.color||TEXT)}};
         c.fill = bg(opts.bg||rowBg);
         c.alignment = {horizontal: opts.align||'left', vertical:'middle'};
+        if (opts.numFmt) c.numFmt = opts.numFmt;
       };
 
       setCell(1, t.ticker, {color:BLUE, bold:true});
       setCell(2, t.theme, {size:9});
       setCell(3, t.appearances, {color:AMBER, bold:true, align:'center'});
       setCell(4, t.direction, {color: t.direction==='Above MA'?GREEN:RED, bold:true, align:'center', size:9});
-      setCell(5, t.consistency+'%', {
-        color: t.consistency>=80?GREEN:t.consistency>=60?AMBER:TEXT2, bold:true, align:'center'
+      setCell(5, t.consistency, {
+        color: t.consistency>=80?GREEN:t.consistency>=60?AMBER:TEXT2, bold:true, align:'center',
+        numFmt: '0"%"'
       });
       const trendColor = t.trend.includes('Escalating')?GREEN:t.trend.includes('Fading')?RED:AMBER;
       setCell(6, t.trend, {color:trendColor, bold:true, align:'center', size:9});
