@@ -1,8 +1,15 @@
-from http.server import BaseHTTPRequestHandler
+ from http.server import BaseHTTPRequestHandler
 import json, io, requests
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
+
+def linregress_slope(xs, ys):
+    n = len(xs)
+    mx = sum(xs)/n; my = sum(ys)/n
+    num = sum((xs[i]-mx)*(ys[i]-my) for i in range(n))
+    den = sum((x-mx)**2 for x in xs)
+    return num/den if den > 0 else 0
 
 SUPA_URL = 'https://bmeqpzytgedymtkwtnis.supabase.co'
 SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtZXFwenl0Z2VkeW10a3d0bmlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2MTI4OTAsImV4cCI6MjA5MzE4ODg5MH0.z0zXbMZd1zTXQuKYV2-yRhAzFmoqPhGp8r025KCdC5M'
