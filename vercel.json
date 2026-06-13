@@ -1,8 +1,14 @@
- {
+{
+  "builds": [
+    {
+      "src": "api/export.py",
+      "use": "@vercel/python"
+    }
+  ],
   "routes": [
     {
       "src": "/api/export",
-      "dest": "/api/export.py"
+      "dest": "api/export.py"
     }
   ]
 }
