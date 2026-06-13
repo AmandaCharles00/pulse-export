@@ -1,13 +1,8 @@
-{
-  "functions": {
-    "api/export.py": {
-      "runtime": "python3.12"
-    }
-  },
+ {
   "routes": [
     {
       "src": "/api/export",
       "dest": "/api/export.py"
     }
   ]
-} 
+}
