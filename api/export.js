@@ -79,7 +79,15 @@ module.exports = async (req, res) => {
         const total = atrs.length;
         const direction = above >= total-above ? 'Above MA' : 'Below MA';
         const consistency = Math.round((above >= total-above ? above : total-above) / total * 100);
-        return {ticker, theme: v.theme, appearances: total, direction, consistency, trend: computeTrend(atrs), months: v.months};
+        const allMksSorted = [...Object.keys(v.months)].sort();
+        const lastAppeared = allMksSorted[allMksSorted.length-1];
+        const now2 = new Date();
+        const [ly, lm] = lastAppeared.split('-').map(Number);
+        const monthsAgo = (now2.getFullYear() - ly) * 12 + (now2.getMonth() + 1 - lm);
+        const recencyLabel = monthsAgo <= 1 ? '● Active' : monthsAgo <= 4 ? `◐ ${monthsAgo}mo ago` : `○ ${monthsAgo}mo ago`;
+        const recencyColor = monthsAgo <= 1 ? '00C97A' : monthsAgo <= 4 ? 'F5A623' : 'FF3D55';
+        const recencyBg = monthsAgo <= 1 ? '003D25' : monthsAgo <= 4 ? '3D2800' : '4D0010';
+        return {ticker, theme: v.theme, appearances: total, direction, consistency, recencyLabel, recencyColor, recencyBg, monthsAgo, trend: computeTrend(atrs), months: v.months};
       })
       .sort((a,b) => b.appearances - a.appearances);
 
@@ -90,7 +98,6 @@ module.exports = async (req, res) => {
 
     const wb = new ExcelJS.Workbook();
 
-    // Colors
     const BG='0D0F14', BG2='12151C', BG3='181C26', HEADER_BG='1E2330';
     const TEXT='CDD6E8', TEXT2='6B7A90';
     const GREEN='00C97A', GREEN_DIM='003D25';
@@ -116,7 +123,6 @@ module.exports = async (req, res) => {
       return TEXT2;
     }
 
-    // ── ABOUT SHEET ──────────────────────────────────────────────────────────
     const ws1 = wb.addWorksheet('About This Report');
     ws1.views = [{showGridLines: false}];
     ws1.getColumn('A').width = 3;
@@ -124,12 +130,10 @@ module.exports = async (req, res) => {
     for (let i = 3; i <= 10; i++) ws1.getColumn(i).width = 14;
 
     const setBg = (row) => {
-      for (let c = 1; c <= 10; c++)
-        ws1.getCell(row, c).fill = bg(BG);
+      for (let c = 1; c <= 10; c++) ws1.getCell(row, c).fill = bg(BG);
     };
     for (let r = 1; r <= 65; r++) setBg(r);
 
-    // Title
     ws1.getRow(2).height = 40;
     ws1.mergeCells('B2:J2');
     const t = ws1.getCell('B2');
@@ -145,10 +149,8 @@ module.exports = async (req, res) => {
 
     ws1.getRow(4).height = 5;
     for (let c = 2; c <= 10; c++) { ws1.getCell(4,c).fill = bg(BLUE); }
-
     ws1.getRow(5).height = 8;
 
-    // Stats
     ws1.getRow(6).height = 28;
     ws1.getRow(7).height = 18;
     const stats = [
@@ -203,6 +205,10 @@ module.exports = async (req, res) => {
     bullet('Appearances — Number of distinct months the ticker was 3x+ ATR from its 50MA.');
     bullet('Direction — Dominant direction: Above MA (bullish extension) or Below MA (bearish/oversold).');
     bullet('Consistency % — What % of appearances were in the dominant direction. 100% = always same way.');
+    bullet('Recency — How recently this ticker last appeared on the scanner.');
+    bullet('● Active = appeared this month or last — currently extended.', true);
+    bullet('◐ Xmo ago = 2–4 months since last appearance — potentially resetting, watch for re-entry.', true);
+    bullet('○ Xmo ago = 5+ months since last appearance — effectively stale until it reappears.', true);
     bullet('Trend — Is the extension magnitude growing or shrinking over time?');
     bullet('↑ Escalating = recent months show stronger extensions than earlier months.', true);
     bullet('↓ Fading = extensions getting smaller — possible trend exhaustion or mean reversion.', true);
@@ -225,36 +231,36 @@ module.exports = async (req, res) => {
     secHeader('HOW TO READ THE DATA TAB');
     bullet('Sort by Appearances (desc) to find the most chronically active tickers.');
     bullet('Sort by Consistency % to separate pure directional names from oscillators.');
+    bullet('Sort by Recency to find Active names currently extended right now.');
     bullet('Sort by Trend to find Escalating names building momentum right now.');
     bullet('Empty ATR cells = ticker was within 3x ATR of 50MA that month (not extended).');
     bullet('A gap between two populated months = potential re-entry setup after a reset.');
     bullet('Negative ATR values = below 50MA. Positive = above. Bold = 5x+ extension.');
 
-    // ── DATA SHEET ────────────────────────────────────────────────────────────
     const ws2 = wb.addWorksheet('Extension Recurrence');
-    ws2.views = [{showGridLines: false, state:'frozen', xSplit:6, ySplit:2}];
+    ws2.views = [{showGridLines: false, state:'frozen', xSplit:7, ySplit:2}];
     ws2.autoFilter = {
       from: {row: 2, column: 1},
-      to: {row: 2, column: 6 + monthKeys.length*2}
+      to: {row: 2, column: 7 + monthKeys.length*2}
     };
 
-    const FIXED = 6;
+    const FIXED = 7;
     ws2.getColumn(1).width = 9;
     ws2.getColumn(2).width = 26;
     ws2.getColumn(3).width = 13;
     ws2.getColumn(4).width = 12;
     ws2.getColumn(5).width = 14;
     ws2.getColumn(6).width = 14;
+    ws2.getColumn(7).width = 14;
     monthKeys.forEach((mk, i) => {
       ws2.getColumn(FIXED+1+i*2).width = 11;
       ws2.getColumn(FIXED+2+i*2).width = 12;
     });
 
-    // Row 1: fixed headers (merged 1-2) + month headers
     ws2.getRow(1).height = 22;
     ws2.getRow(2).height = 18;
 
-    ['TICKER','THEME','APPEARANCES','DIRECTION','CONSISTENCY %','TREND'].forEach((lbl, i) => {
+    ['TICKER','THEME','APPEARANCES','DIRECTION','CONSISTENCY %','RECENCY','TREND'].forEach((lbl, i) => {
       ws2.mergeCells(1, i+1, 2, i+1);
       const c = ws2.getCell(1, i+1);
       c.value = lbl; c.font = {name:'Arial', size:8, bold:true, color:{argb:'FF'+TEXT2}};
@@ -298,8 +304,15 @@ module.exports = async (req, res) => {
         color: t.consistency>=80?GREEN:t.consistency>=60?AMBER:TEXT2, bold:true, align:'center',
         numFmt: '0"%"'
       });
+
+      const recCell = ws2.getCell(row, 6);
+      recCell.value = t.recencyLabel;
+      recCell.font = {name:'Arial', size:9, bold:true, color:{argb:'FF'+t.recencyColor}};
+      recCell.fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FF'+t.recencyBg}};
+      recCell.alignment = {horizontal:'center', vertical:'middle'};
+
       const trendColor = t.trend.includes('Escalating')?GREEN:t.trend.includes('Fading')?RED:AMBER;
-      setCell(6, t.trend, {color:trendColor, bold:true, align:'center', size:9});
+      setCell(7, t.trend, {color:trendColor, bold:true, align:'center', size:9});
 
       monthKeys.forEach((mk, i) => {
         const col = FIXED+1+i*2;
