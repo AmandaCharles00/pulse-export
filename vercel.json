@@ -1,8 +1,1 @@
- {
-  "routes": [
-    {
-      "src": "/api/export",
-      "dest": "/api/export.js"
-    }
-  ]
-}
+  { "routes": [ { "src": "/api/export", "dest": "/api/export.js" }, { "src": "/api/weather", "dest": "/api/weather.js" } ] }
