@@ -1,24 +1,42 @@
 const https = require('https');
 
 // Fed "net liquidity" = Fed total assets (WALCL) - Treasury General Account (WTREGEN)
-// - Overnight reverse repo (RRPONTSYD). Pulled from FRED's public CSV endpoint
-// (no API key needed). All values returned in $ billions.
-function fetchText(url) {
+// - Overnight reverse repo (RRPONTSYD). Uses the official FRED API when the
+// FRED_API_KEY environment variable is set, otherwise falls back to the public CSV.
+// All values returned in $ billions.
+function fetchText(url, tries = 2) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'pulse-scanner-liquidity/1.0' } }, res => {
+    const req = https.get(url, { headers: { 'User-Agent': 'pulse-scanner-liquidity/1.0' } }, res => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return fetchText(res.headers.location).then(resolve, reject);
+        return fetchText(res.headers.location, tries).then(resolve, reject);
       }
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => resolve(data));
-    }).on('error', reject);
+    });
+    req.setTimeout(7000, () => req.destroy(new Error('timeout')));
+    req.on('error', e => {
+      if (tries > 1) fetchText(url, tries - 1).then(resolve, reject);
+      else reject(e);
+    });
   });
 }
 
 async function series(id, start) {
-  const txt = await fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=' + id + '&cosd=' + start);
+  const key = process.env.FRED_API_KEY;
   const out = [];
+  if (key) {
+    const txt = await fetchText('https://api.stlouisfed.org/fred/series/observations?series_id=' + id +
+      '&api_key=' + key + '&file_type=json&observation_start=' + start);
+    const j = JSON.parse(txt);
+    if (!j.observations) throw new Error('FRED API: ' + (j.error_message || 'bad response'));
+    j.observations.forEach(o => {
+      const n = parseFloat(o.value);
+      if (o.date && isFinite(n)) out.push({ d: o.date, v: n });
+    });
+    return out;
+  }
+  const txt = await fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=' + id + '&cosd=' + start);
   txt.trim().split(/\r?\n/).slice(1).forEach(line => {
     const [d, v] = line.split(',');
     const n = parseFloat(v);
