@@ -1,24 +1,44 @@
 const https = require('https');
 
 // Fed "net liquidity" = Fed total assets (WALCL) - Treasury General Account (WTREGEN)
-// - Overnight reverse repo (RRPONTSYD). Pulled from FRED's public CSV endpoint
-// (no API key needed). All values returned in $ billions.
-function fetchText(url) {
+// - Overnight reverse repo (RRPONTSYD). Uses the official FRED API when the
+// FRED_API_KEY environment variable is set, otherwise the public CSV link.
+// Returns one point per day, all values in $ billions.
+let LAST_GOOD = null;
+
+function fetchText(url, tries = 2) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'pulse-scanner-liquidity/1.0' } }, res => {
+    const req = https.get(url, { headers: { 'User-Agent': 'pulse-scanner-liquidity/1.0' } }, res => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return fetchText(res.headers.location).then(resolve, reject);
+        return fetchText(res.headers.location, tries).then(resolve, reject);
       }
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => resolve(data));
-    }).on('error', reject);
+    });
+    req.setTimeout(3000, () => req.destroy(new Error('timeout')));
+    req.on('error', e => {
+      if (tries > 1) setTimeout(() => fetchText(url, tries - 1).then(resolve, reject), 200);
+      else reject(e);
+    });
   });
 }
 
 async function series(id, start) {
-  const txt = await fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=' + id + '&cosd=' + start);
+  const key = process.env.FRED_API_KEY;
   const out = [];
+  if (key) {
+    const txt = await fetchText('https://api.stlouisfed.org/fred/series/observations?series_id=' + id +
+      '&api_key=' + key + '&file_type=json&observation_start=' + start);
+    const j = JSON.parse(txt);
+    if (!j.observations) throw new Error('FRED API: ' + (j.error_message || 'bad response'));
+    j.observations.forEach(o => {
+      const n = parseFloat(o.value);
+      if (o.date && isFinite(n)) out.push({ d: o.date, v: n });
+    });
+    return out;
+  }
+  const txt = await fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=' + id + '&cosd=' + start);
   txt.trim().split(/\r?\n/).slice(1).forEach(line => {
     const [d, v] = line.split(',');
     const n = parseFloat(v);
@@ -36,13 +56,14 @@ function asOf(arr, d) {
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
+  const usingKey = !!process.env.FRED_API_KEY;
   try {
     const start = new Date(Date.now() - 400 * 864e5).toISOString().slice(0, 10);
-    const [walcl, tga, rrp] = await Promise.all([series('WALCL', start), series('WTREGEN', start), series('RRPONTSYD', start)]);
+    // one at a time keeps us inside Vercel's 10s limit even with retries
+    const walcl = await series('WALCL', start);
+    const tga = await series('WTREGEN', start);
+    const rrp = await series('RRPONTSYD', start);
     const pts = [];
-    // One point per day (the daily reverse-repo dates), pairing each with the
-    // latest weekly balance sheet and Treasury General Account known on that day.
     rrp.forEach(r => {
       const w = asOf(walcl, r.d), t = asOf(tga, r.d);
       if (w == null || t == null) return;
@@ -51,8 +72,19 @@ module.exports = async (req, res) => {
       pts.push({ date: r.d, walcl: +(w / 1000).toFixed(1), tga: +(t / 1000).toFixed(1), rrp: +r.v.toFixed(1), net: +net.toFixed(1) });
     });
     if (pts.length < 75) throw new Error('Not enough FRED data');
-    res.status(200).json({ series: pts.slice(-90), updated: new Date().toISOString() });
+    LAST_GOOD = { series: pts.slice(-90), updated: new Date().toISOString(), source: usingKey ? 'fred-api' : 'fred-csv' };
+    res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
+    res.status(200).json(LAST_GOOD);
   } catch (e) {
-    res.status(500).json({ error: String(e.message || e) });
+    if (LAST_GOOD) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).json(Object.assign({ stale: true }, LAST_GOOD));
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(500).json({
+      error: String(e.message || e),
+      usingApiKey: usingKey,
+      hint: usingKey ? 'FRED API key is set but the request failed; retry in a moment.' : 'FRED_API_KEY is NOT set in Vercel; the public FRED link is unreliable. Add the key under Settings > Environment Variables and redeploy.'
+    });
   }
 };
