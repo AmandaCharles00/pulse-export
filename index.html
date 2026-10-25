@@ -1172,52 +1172,70 @@ function _sma(a,n){if(a.length<n)return null;return a.slice(-n).reduce((s,v)=>s+
 function _cl(tk,off){const c=cache[tk]&&cache[tk].closes;if(!c||c.length<60)return null;return off?c.slice(0,c.length-off):c;}
 function _ret(c,n){if(!c||c.length<=n)return null;const a=c[c.length-1-n];return a?(c[c.length-1]/a-1)*100:null;}
 function _arrow(b){return b?'▲':'▼';}
+function _x(name,off){const a=window._liq&&window._liq.extra&&window._liq.extra[name];if(!a||a.length<70)return null;const v=a.map(o=>o.v);return off?v.slice(0,v.length-off):v;}
+function _d(a,n){return a&&a.length>n?a[a.length-1]-a[a.length-1-n]:null;}
+function _geoOvr(){try{const j=JSON.parse(localStorage.getItem('macro_geo')||'null');return j&&(j.v===1||j.v===0||j.v===-1)?j:null;}catch(e){return null;}}
 function pillarScores(off){
   const out=[];
-  // 1) Technical Analysis — SPY & QQQ vs 50 EMA and 200 SMA
+  const sgn=v=>(v>=0?'+':'')+v.toFixed(1);
+  // 1) Technical Analysis — SPY & QQQ vs 50 EMA / 200 SMA, minus a penalty for a deep QQQ drawdown
   {let pts=0,n=0,det=[];
-   ['SPY','QQQ'].forEach(tk=>{const c=_cl(tk,off);if(!c||c.length<200)return;const p=c[c.length-1],e=_ema(c,50),s=_sma(c,200);
-     const a=p>e,b=p>s;pts+=(a?1:0)+(b?1:0);n+=2;det.push(tk+' '+_arrow(a)+'50 '+_arrow(b)+'200');});
+   ['SPY','QQQ'].forEach(tk=>{const c=_cl(tk,off);if(!c||c.length<200)return;const p=c[c.length-1],e=_ema(c,50),s2=_sma(c,200);
+     const a=p>e,b=p>s2;pts+=(a?1:0)+(b?1:0);n+=2;det.push(tk+' '+_arrow(a)+'50 '+_arrow(b)+'200');});
+   const q=_cl('QQQ',off);
+   if(q&&q.length>=60){const hi=Math.max(...q.slice(-60)),dd=(q[q.length-1]/hi-1)*100;if(dd<=-7)pts-=1;det.push('QQQ '+dd.toFixed(1)+'% off 60d high');}
    out.push(n?{v:pts>=3?1:pts>=2?0:-1,d:det.join(' · ')}:null);}
-  // 2) Market Structure — breadth (% of tickers above 50 EMA) + equal-weight vs cap-weight (20d)
+  // 2) Market Structure — breadth, credit spreads, volatility, equal-weight (only counted when SPY is rising)
   {let up=0,tot=0;const seen=new Set();
    THEMES.forEach(t=>t.tickers.forEach(tk=>{if(seen.has(tk))return;seen.add(tk);const c=_cl(tk,off);if(!c||c.length<60)return;tot++;if(c[c.length-1]>_ema(c,50))up++;}));
    const rs=_cl('RSP',off),sp=_cl('SPY',off);
    if(tot>20){const b=up/tot*100;let pts=b>=60?1:b<40?-1:0;let det=b.toFixed(0)+'% above 50EMA';
-     if(rs&&sp){const d=_ret(rs,20)-_ret(sp,20);pts+=d>0.5?1:d<-0.5?-1:0;det+=' · RSP vs SPY '+(d>=0?'+':'')+d.toFixed(1)+'pp (20d)';}
+     const hy=_x('hy',off),vx=_x('vix',off);
+     if(hy){const c=_d(hy,20);pts+=c>0.15?-1:c<-0.15?1:0;det+=' · HY spread '+hy[hy.length-1].toFixed(2)+' ('+(c>=0?'▲':'▼')+Math.abs(c).toFixed(2)+' 4w)';}
+     else{const h=_cl('HYG',off);if(h){const a=h[h.length-1]>_ema(h,50);pts+=a?1:-1;det+=' · HYG '+_arrow(a)+'50EMA';}}
+     if(vx&&vx.length>21){const v=vx[vx.length-1],c=(v/vx[vx.length-21]-1)*100;pts+=(v>25||c>25)?-1:(v<16&&c<10)?1:0;det+=' · VIX '+v.toFixed(1);}
+     if(rs&&sp&&_ret(sp,20)>0){const d=_ret(rs,20)-_ret(sp,20);pts+=d>0.5?1:d<-0.5?-1:0;det+=' · RSP vs SPY '+sgn(d)+'pp';}
+     out.push({v:pts>=2?1:pts<=-2?-1:0,d:det});}
+   else out.push(null);}
+  // 3) Monetary & Fiscal — 10Y yield trend, 2s10s curve, oil inflation pressure (FRED); TLT/HYG fallback
+  {const y=_x('y10',off),cv=_x('curve',off),o=_cl('USO',off);
+   if(y&&cv){let pts=0;const dy=_d(y,60),dc=_d(cv,20);
+     pts+=dy>0.25?-1:dy<-0.25?1:0;pts+=dc<-0.10?-1:dc>0.10?1:0;
+     let det='10Y '+y[y.length-1].toFixed(2)+'% ('+(dy>=0?'+':'')+dy.toFixed(2)+' 3M) · 2s10s '+cv[cv.length-1].toFixed(2)+' ('+(dc>=0?'+':'')+dc.toFixed(2)+' 4w)';
+     if(o){const r=_ret(o,20);if(r>8){pts-=1;det+=' · Oil '+sgn(r)+'% (inflation pressure)';}}
      out.push({v:pts>=1?1:pts<=-1?-1:0,d:det});}
-   else out.push(null);}
-  // 3) Monetary & Fiscal — TLT trend + HYG credit (proxy)
-  {const t=_cl('TLT',off),h=_cl('HYG',off);
-   if(t&&h){let pts=0;const a=t[t.length-1]>_ema(t,50),b=_ret(t,60)>0,c=h[h.length-1]>_ema(h,50);
-     pts=(a?1:-1)+(b?1:-1)+(c?1:-1);
-     out.push({v:pts>=2?1:pts<=-2?-1:0,d:'TLT '+_arrow(a)+'50EMA · TLT 3M '+_arrow(b)+' · HYG '+_arrow(c)+'50EMA'});}
-   else out.push(null);}
-  // 4) Global Liquidity — Fed net liquidity (WALCL - TGA - RRP) when the feed is loaded, else US dollar proxy
+   else{const t=_cl('TLT',off),h=_cl('HYG',off);
+     if(t&&h){const a=t[t.length-1]>_ema(t,50),b=_ret(t,60)>0,c=h[h.length-1]>_ema(h,50);const pts=(a?1:-1)+(b?1:-1)+(c?1:-1);
+       out.push({v:pts>=2?1:pts<=-2?-1:0,d:'TLT '+_arrow(a)+'50EMA · TLT 3M '+_arrow(b)+' · HYG '+_arrow(c)+'50EMA (proxy)'});}
+     else out.push(null);}}
+  // 4) Global Liquidity — Fed net liquidity (13w change weighted double), else US dollar proxy
   {const L=window._liq&&window._liq.series;const u=_cl('UUP',off);
    if(L&&L.length>=75){const e=L.length-1-off;
      const cur=L[e].net,c4=(cur/L[e-20].net-1)*100,c13=(cur/L[e-65].net-1)*100;
-     const pts=(c4>0.3?1:c4<-0.3?-1:0)+(c13>0.5?1:c13<-0.5?-1:0);
-     out.push({v:pts>=1?1:pts<=-1?-1:0,d:'Fed net liquidity $'+(cur/1000).toFixed(2)+'T · 4w '+(c4>=0?'+':'')+c4.toFixed(1)+'% · 13w '+(c13>=0?'+':'')+c13.toFixed(1)+'%'});}
+     const pts=(c4>0.3?1:c4<-0.3?-1:0)+(c13>0.5?2:c13<-0.5?-2:0);
+     out.push({v:pts>=2?1:pts<=-2?-1:0,d:'Fed net liquidity $'+(cur/1000).toFixed(2)+'T · 4w '+sgn(c4)+'% · 13w '+sgn(c13)+'%'});}
    else if(u){const weakA=u[u.length-1]<_ema(u,50),weakB=_ret(u,60)<0;const pts=(weakA?1:-1)+(weakB?1:-1);
-     out.push({v:pts>=2?1:pts<=-2?-1:0,d:'USD (UUP) '+(weakA?'below':'above')+' 50EMA · 3M '+(weakB?'down':'up')});}
+     out.push({v:pts>=2?1:pts<=-2?-1:0,d:'USD (UUP) '+(weakA?'below':'above')+' 50EMA · 3M '+(weakB?'down':'up')+' (proxy)'});}
    else out.push(null);}
-  // 5) Gov't & Geopolitics — gold vs SPY, oil spike, SPY drawdown (proxy)
-  {const g=_cl('GLD',off),sp=_cl('SPY',off),o=_cl('USO',off);
+  // 5) Gov't & Geopolitics — gold vs SPY, oil spike, SPY drawdown; manual override applies to today's read
+  {const g=_cl('GLD',off),sp=_cl('SPY',off),o=_cl('USO',off);let auto=null;
    if(g&&sp){let pts=0;const d=_ret(g,20)-_ret(sp,20);pts+=d>2?-1:d<-2?1:0;
      const hi=Math.max(...sp.slice(-20)),dd=(sp[sp.length-1]/hi-1)*100;pts+=dd<-5?-1:dd>-2?1:0;
-     let det='Gold vs SPY '+(d>=0?'+':'')+d.toFixed(1)+'pp · SPY '+dd.toFixed(1)+'% off 20d high';
-     if(o){const r=_ret(o,20);if(r>8)pts-=1;det+=' · Oil '+(r>=0?'+':'')+r.toFixed(0)+'%';}
-     out.push({v:pts>=1?1:pts<=-1?-1:0,d:det});}
-   else out.push(null);}
+     let det='Gold vs SPY '+sgn(d)+'pp · SPY '+dd.toFixed(1)+'% off 20d high';
+     if(o){const r=_ret(o,20);if(r>8)pts-=1;det+=' · Oil '+sgn(r)+'%';}
+     auto={v:pts>=1?1:pts<=-1?-1:0,d:det};}
+   const ov=off===0?_geoOvr():null;
+   if(ov){const nm=ov.v===1?'Risk On':ov.v===-1?'Risk Off':'Neutral';
+     out.push({v:ov.v,d:'Manual: '+(ov.note||'no note')+(auto?' · auto proxy read '+(auto.v===1?'On':auto.v===-1?'Off':'Neutral')+' ('+auto.d+')':''),manual:true});}
+   else out.push(auto);}
   return out;
 }
 const MACRO_PILLARS=[
-  ['Technical Analysis','SPY & QQQ vs 50 EMA and 200 SMA. 3-4 of 4 above = Risk On, 2 = Neutral, 0-1 = Risk Off.'],
-  ['Market Structure','% of your tracked tickers above their 50 EMA (60%+ On, under 40% Off) plus equal-weight (RSP) vs cap-weight (SPY) 20-day return.'],
-  ['Monetary & Fiscal Policy','Proxy: TLT trend (falling bonds = rising yields = tighter), TLT 3M direction, and HYG credit trend.'],
-  ['Global Liquidity','Fed net liquidity = balance sheet (WALCL) minus Treasury General Account minus reverse repo, from FRED. Rising over 4w and 13w = On, falling = Off. Falls back to the US dollar (UUP) trend if the feed is unreachable.'],
-  ['Gov’t & Geopolitics','Proxy: gold outperforming SPY, oil spikes (+8% in 20d) and SPY drawdown from its 20-day high all point to stress.']
+  ['Technical Analysis','SPY & QQQ vs 50 EMA and 200 SMA (3-4 of 4 above = On, 2 = Neutral, 0-1 = Off). A QQQ drawdown of 7%+ from its 60-day high subtracts a point.'],
+  ['Market Structure','Points from: % of your tickers above 50 EMA (60%+ On, under 40% Off); high-yield credit spread widening/tightening over 4 weeks; VIX above 25 or jumping 25%+ (Off) vs under 16 (On); equal-weight vs cap-weight only counts while SPY is rising. Two net points flips the score.'],
+  ['Monetary & Fiscal Policy','FRED data: 10Y yield change over 3 months (rising = tighter), 2s10s curve over 4 weeks (flattening = tighter), plus a point off for an oil spike of 8%+ (inflation pressure). Falls back to a TLT/HYG read if FRED data is unavailable.'],
+  ['Global Liquidity','Fed net liquidity (balance sheet minus TGA minus reverse repo) from FRED. The 13-week change counts double and the 4-week change counts once; two net points flips the score. Falls back to the US dollar trend if the feed is down.'],
+  ['Gov\u2019t & Geopolitics','Automatic proxy: gold outperforming SPY, oil spikes of 8%+ and SPY drawdown. You can override it with the dropdown (saved in this browser) for things the data cannot see, such as elections.']
 ];
 const LIQUIDITY_URL='https://pulse-export.vercel.app/api/liquidity';
 function loadLiquidity(){
@@ -1257,6 +1275,18 @@ function buildMacroPillars(){
       '<div style="font-size:10px;color:var(--text2);font-family:var(--mono)">'+(n?n.d:'Not enough data — sync again')+'</div></div>';
   });
   panel.innerHTML=h;
+  {const gr=panel.querySelectorAll('div[title]')[4];
+   if(gr&&gr.lastElementChild){
+     const ov=_geoOvr();const box=document.createElement('div');box.style.cssText='margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap';
+     const sel=document.createElement('select');
+     sel.style.cssText='background:var(--bg3);border:1px solid var(--border2);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:10px;padding:2px 4px';
+     [['auto','Auto (proxy)'],['1','Override: Risk On'],['0','Override: Neutral'],['-1','Override: Risk Off']].forEach(([k,t2])=>{const o=document.createElement('option');o.value=k;o.textContent=t2;sel.appendChild(o);});
+     sel.value=ov?String(ov.v):'auto';
+     const note=document.createElement('input');note.type='text';note.placeholder='note (e.g. midterms)';note.value=ov&&ov.note||'';
+     note.style.cssText='background:var(--bg3);border:1px solid var(--border2);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:10px;padding:2px 6px;width:170px';
+     const save=()=>{try{if(sel.value==='auto')localStorage.removeItem('macro_geo');else localStorage.setItem('macro_geo',JSON.stringify({v:+sel.value,note:note.value.trim()}));}catch(e){}renderSpreads();};
+     sel.addEventListener('change',save);note.addEventListener('change',save);
+     box.append(sel,note);gr.lastElementChild.appendChild(box);}}
   const cb=panel.querySelector('#macro-cmp');
   [[1,'1D'],[5,'1W']].forEach(([k,t])=>{
     const on=macroCmp===k,b=document.createElement('button');b.textContent=t;
