@@ -63,6 +63,18 @@ module.exports = async (req, res) => {
     const walcl = await series('WALCL', start);
     const tga = await series('WTREGEN', start);
     const rrp = await series('RRPONTSYD', start);
+    // Extra macro series (credit spread, VIX, 10Y yield, 2s10s). Only with the API key,
+    // fetched in parallel, and never allowed to break the liquidity result.
+    let extra = null;
+    if (usingKey) {
+      const grab = id => series(id, start).then(a => a.slice(-130).map(o => ({ d: o.d, v: o.v }))).catch(() => null);
+      const [hy, vix, y10, curve] = await Promise.all([grab('BAMLH0A0HYM2'), grab('VIXCLS'), grab('DGS10'), grab('T10Y2Y')]);
+      extra = {};
+      if (hy) extra.hy = hy;
+      if (vix) extra.vix = vix;
+      if (y10) extra.y10 = y10;
+      if (curve) extra.curve = curve;
+    }
     const pts = [];
     rrp.forEach(r => {
       const w = asOf(walcl, r.d), t = asOf(tga, r.d);
@@ -72,7 +84,7 @@ module.exports = async (req, res) => {
       pts.push({ date: r.d, walcl: +(w / 1000).toFixed(1), tga: +(t / 1000).toFixed(1), rrp: +r.v.toFixed(1), net: +net.toFixed(1) });
     });
     if (pts.length < 75) throw new Error('Not enough FRED data');
-    LAST_GOOD = { series: pts.slice(-90), updated: new Date().toISOString(), source: usingKey ? 'fred-api' : 'fred-csv' };
+    LAST_GOOD = { series: pts.slice(-90), extra, updated: new Date().toISOString(), source: usingKey ? 'fred-api' : 'fred-csv' };
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
     res.status(200).json(LAST_GOOD);
   } catch (e) {
